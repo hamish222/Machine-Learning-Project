@@ -1,0 +1,85 @@
+---
+title: "Practical Machine Learning Project"
+author: "hamish222"
+date: "June 23, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Overview
+
+The goal of this project is to predict which barbell lifts are properly performed based on accelerometer data placed on subjects' belt, forearm, and arm.  The data come from http://groupware.les.inf.puc-rio.br/har.
+
+# Data Processing
+
+Load the data and count the number of rows and columns.
+
+```{r}
+setwd("U:\\Private\\EducationalMaterials\\Coursera Data Science\\Course 8")
+trainingData <- read.csv("pml-training.csv")
+numColumns <- dim(trainingData)[[2]]
+numRows <- dim(trainingData)[[1]]
+```
+
+Looking at the data (not shown), we see that column 1 corresponds to a counter, so it can be removed.  Similarly, columns 3, 4, and 5 are time stamps that seem unimportant, so we will delete them too.  In addition, there are 100 variables whose columns contain almost 98% empty strings or NA.  Since they have little to no predictive power, let's remove them too.  All of the remaining variable types appear, at least superficially, to be appropriate for potential inclusion in the model.
+
+```{r}
+badColumns <- c(1,3,4,5)
+for (k in 2:numColumns){
+  temp <- trainingData[,k]
+  numBadEntries <- sum(is.na(temp)|temp=="")
+  if (numBadEntries > 0.95*numRows){
+    badColumns <- c(badColumns,k)
+  }
+}
+trainingData <- subset(trainingData, select=-badColumns)
+```
+
+
+
+# Build the Model  
+
+Model building tends to be slow for our training data, so it helps to parallelize.  Some of the code in the following block is borrowed from https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md.
+
+Preliminary applications (no cross validation) of the rf, gbm, lda, rpart, and nb methods gave accuracies of 1.0000, 0.9938, 0.7488, 0.4956, and 0.7658, respectively on the training data.  I chose to pursue exclusive use of random forests since the preliminary run was so good.  The only significant drawback is that the rf algorithm is time consuming, but parallelization helps with that.
+
+I chose to do 10-fold cross validation with 3 repeats.  As a novice, I don't have a particularly good reason to choose that method, but it was recommended by online sources.
+ 
+```{r}
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+library(MASS)
+library(lattice)
+library(ggplot2)
+library(caret)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+train_control <- trainControl(method="repeatedcv", number=10, repeats=3, allowParallel=TRUE) 
+set.seed(1234)
+model <- train(classe~., method="rf", data=trainingData, trControl=train_control) # Random Forest
+stopCluster(cluster)  # Shut down the cluster.
+```
+
+# Check Model Performance
+
+Let's verify that the random forest algorithm performed well on the training data.  As we can see from confusion matrix below, the random forest perfectly predicts all 19622 outcomes in the training data!
+```{r}
+predicted <- predict(model,trainingData)
+confusionMatrix(predicted, trainingData$classe)
+```
+
+# Apply Model to Test Data
+
+We don't expect perfect prediction for our model on out-of-sample data, but we hope that it is still very accurate.
+
+```{r}
+testingData <- read.csv("pml-testing.csv")
+print(predict(model,testingData))
+```
+
+
